@@ -18,7 +18,7 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>The Cube</Text>
+      <Text style={styles.title}>Beat The Cube</Text>
       <Text style={styles.subtitle}>6 Exciting & Addictive Minigames</Text>
 
       <View style={styles.grid}>

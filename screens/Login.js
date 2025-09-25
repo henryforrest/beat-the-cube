@@ -1,5 +1,4 @@
-// AuthScreen.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,11 +6,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { auth, db } from "../firebase";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  onAuthStateChanged,
 } from "firebase/auth";
 import { setDoc, doc, serverTimestamp } from "firebase/firestore";
 
@@ -23,6 +24,17 @@ export default function AuthScreen({ navigation }) {
   const [username, setUsername] = useState("");
   const [dob, setDob] = useState(""); // YYYY-MM-DD
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // 👇 Auto-redirect if already logged in
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        navigation.replace("Home");
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   const handleRegister = async () => {
     setError("");
@@ -31,6 +43,7 @@ export default function AuthScreen({ navigation }) {
       return;
     }
 
+    setLoading(true);
     try {
       const userCred = await createUserWithEmailAndPassword(
         auth,
@@ -45,26 +58,30 @@ export default function AuthScreen({ navigation }) {
         createdAt: serverTimestamp(),
       });
 
-      navigation.replace("Home");
+      // no need for navigation here; onAuthStateChanged will redirect
     } catch (err) {
       console.error("Register error:", err);
       handleAuthError(err);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleLogin = async () => {
     setError("");
+    setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      navigation.replace("Home");
+      // onAuthStateChanged will handle navigation
     } catch (err) {
       console.error("Login error:", err);
       handleAuthError(err);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleAuthError = (err) => {
-    // Friendlier Firebase error messages
     switch (err.code) {
       case "auth/email-already-in-use":
         setError("This email is already registered.");
@@ -134,14 +151,18 @@ export default function AuthScreen({ navigation }) {
         </>
       )}
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={isRegistering ? handleRegister : handleLogin}
-      >
-        <Text style={styles.buttonText}>
-          {isRegistering ? "Register" : "Login"}
-        </Text>
-      </TouchableOpacity>
+      {loading ? (
+        <ActivityIndicator size="large" color="#2a4d8f" style={{ marginTop: 20 }} />
+      ) : (
+        <TouchableOpacity
+          style={styles.button}
+          onPress={isRegistering ? handleRegister : handleLogin}
+        >
+          <Text style={styles.buttonText}>
+            {isRegistering ? "Register" : "Login"}
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity
         style={styles.toggleButton}
