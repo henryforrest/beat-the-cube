@@ -1,13 +1,9 @@
+// BallScreen.js
 import React, { useState, useEffect, useRef } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-  Animated,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { auth, db } from "../firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 
 const { width } = Dimensions.get("window");
 const BOX_SIZE = Math.min(width * 0.6, 250);
@@ -15,129 +11,65 @@ const BALL_RADIUS = 12;
 const VELOCITY = { x: 1.5, y: 2 };
 
 export default function HiddenBallGame({ navigation }) {
-  const [ball, setBall] = useState({
-    x: BOX_SIZE / 2,
-    y: BOX_SIZE / 2,
-    vx: VELOCITY.x,
-    vy: VELOCITY.y,
-  });
+  const [ball, setBall] = useState({ x: BOX_SIZE / 2, y: BOX_SIZE / 2, vx: VELOCITY.x, vy: VELOCITY.y });
   const [litWall, setLitWall] = useState(null);
   const [clicked, setClicked] = useState(false);
   const [ballVisible, setBallVisible] = useState(true);
   const [locked, setLocked] = useState(false);
-  const [result, setResult] = useState(null); // "win" | "lose" | null
-  const [lastResult, setLastResult] = useState(null); // yesterday’s outcome
+  const [result, setResult] = useState(null);
+  const [lastResult, setLastResult] = useState(null);
 
   const raf = useRef(null);
   const flickerRef = useRef(null);
-
   const ballOpacity = useRef(new Animated.Value(1)).current;
 
-  // check if already played today
   useEffect(() => {
     const checkAttempt = async () => {
       const today = new Date().toDateString();
       const lastAttempt = await AsyncStorage.getItem("hiddenBallAttempt");
       const outcome = await AsyncStorage.getItem("hiddenBallResult");
-
       if (lastAttempt === today) {
         setLocked(true);
-        setLastResult(outcome); // "win" or "lose"
+        setLastResult(outcome);
       }
     };
     checkAttempt();
   }, []);
 
-  // animate ball
   useEffect(() => {
     if (locked || result) return;
-
     const animate = () => {
-      setBall((prev) => {
+      setBall(prev => {
         let { x, y, vx, vy } = prev;
         let newLit = null;
-
-        x += vx;
-        y += vy;
-
-        if (x <= BALL_RADIUS || x >= BOX_SIZE - BALL_RADIUS) {
-          vx = -vx;
-          newLit = x <= BALL_RADIUS ? "left" : "right";
-        }
-        if (y <= BALL_RADIUS || y >= BOX_SIZE - BALL_RADIUS) {
-          vy = -vy;
-          newLit = y <= BALL_RADIUS ? "top" : "bottom";
-        }
-
-        if (newLit) {
-          setLitWall(newLit);
-          setTimeout(() => setLitWall(null), 200);
-        }
-
+        x += vx; y += vy;
+        if (x <= BALL_RADIUS || x >= BOX_SIZE - BALL_RADIUS) { vx = -vx; newLit = x <= BALL_RADIUS ? "left" : "right"; }
+        if (y <= BALL_RADIUS || y >= BOX_SIZE - BALL_RADIUS) { vy = -vy; newLit = y <= BALL_RADIUS ? "top" : "bottom"; }
+        if (newLit) { setLitWall(newLit); setTimeout(() => setLitWall(null), 200); }
         return { x, y, vx, vy };
       });
-
       raf.current = requestAnimationFrame(animate);
     };
-
     raf.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(raf.current);
   }, [locked, result]);
 
-  // fade out after 2s and then flicker
   useEffect(() => {
     if (locked || result) return;
-
-    const timeout = setTimeout(() => {
-      setBallVisible(false);
-    }, 2000);
-
+    const timeout = setTimeout(() => setBallVisible(false), 2000);
     flickerRef.current = setInterval(() => {
       if (!ballVisible) {
         Animated.sequence([
-          Animated.timing(ballOpacity, {
-            toValue: Math.random() * 0.6 + 0.2,
-            duration: 150,
-            useNativeDriver: true,
-          }),
-          Animated.timing(ballOpacity, {
-            toValue: 0,
-            duration: 150,
-            useNativeDriver: true,
-          }),
+          Animated.timing(ballOpacity, { toValue: Math.random() * 0.6 + 0.2, duration: 150, useNativeDriver: true }),
+          Animated.timing(ballOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
         ]).start();
       }
     }, 2000);
-
-    return () => {
-      clearTimeout(timeout);
-      clearInterval(flickerRef.current);
-    };
+    return () => { clearTimeout(timeout); clearInterval(flickerRef.current); };
   }, [ballVisible, locked, result]);
 
-   // 🔄 Dev Retry Button: clears today's play restriction
-  const devRetry = async () => {
-    const today = new Date().toDateString();
-    await AsyncStorage.removeItem("hiddenBallAttempt");
-    await AsyncStorage.removeItem("hiddenBallResult");
-
-    setLocked(false);
-    setResult(null);
-    setClicked(false);
-    setBall({
-      x: BOX_SIZE / 2,
-      y: BOX_SIZE / 2,
-      vx: VELOCITY.x,
-      vy: VELOCITY.y,
-    });
-    setBallVisible(true);
-    setLitWall(null);
-
-    console.log("🔧 Dev Retry: daily lock reset");
-  };
-
   const handlePress = async (e) => {
-    if (clicked || locked) return;
+    if (clicked || locked || !auth.currentUser) return;
     setClicked(true);
 
     const today = new Date().toDateString();
@@ -146,59 +78,36 @@ export default function HiddenBallGame({ navigation }) {
     const dy = locationY - ball.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    let outcome;
-    if (dist <= BALL_RADIUS) {
-      outcome = "win";
-      setResult("win");
-    } else {
-      outcome = "lose";
-      setResult("lose");
-    }
+    let outcome = dist <= BALL_RADIUS ? "win" : "lose";
+    setResult(outcome);
 
-    // store attempt + result
     await AsyncStorage.setItem("hiddenBallAttempt", today);
     await AsyncStorage.setItem("hiddenBallResult", outcome);
+
+    try {
+      await addDoc(collection(db, "gameResults"), {
+        userId: auth.currentUser.uid,
+        game: "ball",
+        outcome,
+        date: today,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("Error saving ball result:", err);
+    }
 
     cancelAnimationFrame(raf.current);
     clearInterval(flickerRef.current);
   };
 
-  // --- LOCKED SCREEN ---
-  if (locked) {
+  if (!auth.currentUser) {
     return (
       <View style={styles.container}>
         <Text style={styles.title}>Hidden Ball</Text>
-
-        {lastResult === "win" && (
-          <Text style={styles.resultText}>✅ Today you found the ball!</Text>
-        )}
-        {lastResult === "lose" && (
-          <Text style={styles.resultText}>❌ Today you missed the ball.</Text>
-        )}
-
-        <Text style={styles.lockedMessage}>⏳ Come back tomorrow!</Text>
-        <Text style={styles.subtitle}>You only get one attempt per day.</Text>
-
-        <TouchableOpacity
-          style={styles.button}
-          onPress={() =>
-            navigation.reset({
-              index: 0,
-              routes: [{ name: "Home" }],
-            })
-          }
-        >
-          <Text style={styles.buttonText}>Back to Home</Text>
+        <Text style={styles.subtitle}>🚪 Please log in to play</Text>
+        <TouchableOpacity style={styles.button} onPress={() => navigation.navigate("Login")}>
+          <Text style={styles.buttonText}>Go to Login</Text>
         </TouchableOpacity>
-
-        {/* 🔄 Dev-only Retry Button */}
-        <TouchableOpacity
-          style={[styles.devButton, { marginTop: 20 }]}
-          onPress={devRetry}
-        >
-          <Text style={styles.devButtonText}>🔧 Dev Retry</Text>
-        </TouchableOpacity>
-
       </View>
     );
   }

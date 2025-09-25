@@ -11,6 +11,7 @@ import OppositeScreen from "./screens/Opposite";
 import BallScreen from "./screens/BallScreen";
 import ThisOrThatScreen from "./screens/ThisOrThatScreen";
 import MemoryDrawScreen from "./screens/MemoryDrawScreen";
+import LoginScreen from "./screens/Login";
 
 const Stack = createNativeStackNavigator();
 
@@ -20,7 +21,7 @@ export default function App() {
       <NavigationContainer>
         <Stack.Navigator
           screenOptions={{
-              headerShown: false, // 🚀 Hides the header (and back button) on ALL screens
+              headerShown: false, 
             }}
         >
           <Stack.Screen name="Home" component={HomeScreen} />
@@ -30,6 +31,7 @@ export default function App() {
           <Stack.Screen name="Ball" component={BallScreen} />
           <Stack.Screen name="ThisThat" component={ThisOrThatScreen} />
           <Stack.Screen name="MemoryDraw" component={MemoryDrawScreen} />
+          <Stack.Screen name="Login" component={LoginScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </GestureHandlerRootView>
