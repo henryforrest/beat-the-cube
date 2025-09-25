@@ -37,14 +37,14 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#eef3fb" },
+  container: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#eef3fb" }, 
   title: { fontSize: 28, fontWeight: "bold", marginBottom: 4, color: "#333" },
   subtitle: { fontSize: 16, marginBottom: 20, color: "#2a4d8f" },
   grid: { flexDirection: "row", flexWrap: "wrap", width: 300, justifyContent: "space-between" },
   face: {
     width: 140,
     height: 140,
-    backgroundColor: "#2a4d8f",
+    backgroundColor: "#DAA520", //#2a4d8f blue to start with and #DAA520 gold if they complete the game by getting a perfect score
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 20,
