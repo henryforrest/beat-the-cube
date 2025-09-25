@@ -1,0 +1,1 @@
+This is a small independent project I am working on. The goal was to try and make a fun and addictive app with a few minigames that could each only be played once a day. I hope you enjoy it if you get the chance to play it. 
