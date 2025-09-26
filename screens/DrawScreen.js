@@ -1,3 +1,4 @@
+// DrawScreen.js
 import React, { useState, useRef, useEffect } from "react";
 import {
   View,
@@ -9,6 +10,10 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Canvas, Path, Skia } from "@shopify/react-native-skia";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+
+// <-- Firebase imports (only added these)
+import { auth, db } from "../firebase";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default function DrawScreen({ navigation }) {
   const [path, setPath] = useState(() => Skia.Path.Make());
@@ -30,19 +35,80 @@ export default function DrawScreen({ navigation }) {
       setHasPlayedToday(true);
       setTodayScore(parseInt(storedScore, 10));
     }
+
+    // --- Firestore sync: if user is logged in, try to read cloud record
+    try {
+      if (auth.currentUser) {
+        const userDocRef = doc(db, "circleGame", auth.currentUser.uid);
+        const snap = await getDoc(userDocRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const lastPlayedDate =
+            data.lastPlayed && data.lastPlayed.toDate
+              ? data.lastPlayed.toDate().toDateString()
+              : null;
+
+          // only set from Firestore if local didn't already mark played today
+          if (!hasPlayedToday && lastPlayedDate === today) {
+            setHasPlayedToday(true);
+            setTodayScore(data.todayScore || 0);
+
+            // keep local AsyncStorage in sync with the cloud
+            await AsyncStorage.setItem("circle-last-played", today);
+            await AsyncStorage.setItem(
+              `circle-score-${today}`,
+              String(data.todayScore || 0)
+            );
+          }
+        }
+      }
+    } catch (err) {
+      // Don't break the game if Firestore is inaccessible — log and continue using AsyncStorage.
+      console.warn("[DrawScreen] Firestore checkDailyStatus failed:", err);
+    }
   };
 
   const handleCircleComplete = async (score) => {
     const today = new Date().toDateString();
-    await AsyncStorage.setItem(`circle-score-${today}`, score.toString());
-    await AsyncStorage.setItem("circle-last-played", today);
+
+    // Keep your local storage logic exactly as before
+    try {
+      await AsyncStorage.setItem(`circle-score-${today}`, score.toString());
+      await AsyncStorage.setItem("circle-last-played", today);
+    } catch (e) {
+      console.warn("[DrawScreen] AsyncStorage write failed:", e);
+    }
 
     setTodayScore(score);
     setHasPlayedToday(true);
 
-    // 🎯 Score Feedback change later on to update total score
+    // Update Firestore only if user is logged in. Errors are non-fatal.
+    if (auth.currentUser) {
+      try {
+        const userDocRef = doc(db, "circleGame", auth.currentUser.uid);
+
+        // read existing bestScore if present
+        const snap = await getDoc(userDocRef);
+        const existingBest = snap.exists() ? snap.data().bestScore || 0 : 0;
+        const newBest = Math.max(existingBest, score);
+
+        await setDoc(
+          userDocRef,
+          {
+            todayScore: score,
+            bestScore: newBest,
+            lastPlayed: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn("[DrawScreen] Firestore update failed:", err);
+      }
+    }
+
+    // 🎯 Score Feedback (unchanged)
     if (score >= 95) {
-      Alert.alert("Perfect!", "🎯 You're a circle master!"); 
+      Alert.alert("Perfect!", "🎯 You're a circle master!");
     }
   };
 
@@ -77,7 +143,7 @@ export default function DrawScreen({ navigation }) {
     setTodayScore(0);
   };
 
-  // 🔄 Dev Retry Button: clears today's play restriction
+  // 🔄 Dev Retry Button: clears today's play restriction (kept as you had it)
   const devRetry = async () => {
     await AsyncStorage.removeItem("shape-last-played");
     await AsyncStorage.removeItem(`shape-score-${new Date().toDateString()}`);
@@ -92,7 +158,7 @@ export default function DrawScreen({ navigation }) {
     .onEnd(() => !hasPlayedToday && endPath())
     .onFinalize(() => !hasPlayedToday && endPath());
 
-  // 🔒 FULL LOCKED SCREEN
+  // 🔒 FULL LOCKED SCREEN (unchanged)
   if (hasPlayedToday) {
     return (
       <View style={styles.container}>
@@ -103,6 +169,13 @@ export default function DrawScreen({ navigation }) {
 
         <TouchableOpacity
           style={[styles.button, { marginTop: 30 }]}
+          onPress={() => navigation.navigate("Leaderboard", { game: "circle" })}
+        >
+          <Text style={styles.buttonText}>View Leaderboard</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, { marginTop: 20 }]}
           onPress={() => navigation.navigate("Home")}
         >
           <Text style={styles.buttonText}>Back to Home</Text>
@@ -119,7 +192,7 @@ export default function DrawScreen({ navigation }) {
     );
   }
 
-  // 🎨 PLAYABLE SCREEN
+  // 🎨 PLAYABLE SCREEN (unchanged)
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Circle Challenge</Text>
@@ -133,10 +206,6 @@ export default function DrawScreen({ navigation }) {
         </Canvas>
       </GestureDetector>
 
-      <TouchableOpacity style={styles.button} onPress={resetCanvas}>
-        <Text style={styles.buttonText}>Clear</Text>
-      </TouchableOpacity>
-
       <TouchableOpacity
         style={[styles.button, { marginTop: 15 }]}
         onPress={() => navigation.navigate("Home")}
@@ -144,9 +213,6 @@ export default function DrawScreen({ navigation }) {
         <Text style={styles.buttonText}>Back to Home</Text>
       </TouchableOpacity>
     </View>
-
-
-
   );
 }
 

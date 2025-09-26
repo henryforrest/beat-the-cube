@@ -44,7 +44,7 @@ const styles = StyleSheet.create({
   face: {
     width: 140,
     height: 140,
-    backgroundColor: "#DAA520", //#2a4d8f blue to start with and #DAA520 gold if they complete the game by getting a perfect score
+    backgroundColor: "#2a4d8f", //#2a4d8f blue to start with and #DAA520 gold if they complete the game by getting a perfect score
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 20,
