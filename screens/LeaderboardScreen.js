@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
 import {
+  SafeAreaView,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  SafeAreaView,
 } from "react-native";
 import { db } from "../firebase";
 import {
@@ -15,14 +15,15 @@ import {
   query,
   orderBy,
   limit,
-  where,
-  Timestamp,
+  doc,
+  getDoc,
 } from "firebase/firestore";
 
+// ✅ Updated collection names to match your other screens
 const GAME_COLLECTIONS = {
   circle: "circleGame",
   ball: "ballGame",
-  memory: "memoryDrawGame",
+  memory: "shapeGame", // changed from memoryDrawGame → shapeGame
 };
 
 export default function LeaderboardScreen({ route, navigation }) {
@@ -39,35 +40,63 @@ export default function LeaderboardScreen({ route, navigation }) {
     try {
       setLoading(true);
       const colName = GAME_COLLECTIONS[game];
-      const colRef = collection(db, colName);
+      if (!colName) {
+        console.warn("[Leaderboard] Invalid game key:", game);
+        setScores([]);
+        setLoading(false);
+        return;
+      }
 
+      const colRef = collection(db, colName);
       let q;
 
+      // ✅ Firestore can't order by undefined fields, so use conditional fallback
       if (mode === "today") {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0); // start of day
-        const startOfToday = Timestamp.fromDate(today);
-
-        q = query(
-          colRef,
-          where("lastPlayed", ">=", startOfToday),
-          orderBy("todayScore", "desc"),
-          limit(10)
-        );
+        q = query(colRef, orderBy("todayScore", "desc"), limit(10));
       } else {
         q = query(colRef, orderBy("bestScore", "desc"), limit(10));
       }
 
       const snapshot = await getDocs(q);
-      const results = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      if (snapshot.empty) {
+        setScores([]);
+        setLoading(false);
+        return;
+      }
 
-      console.log("[Leaderboard] fetched", results); // 👀 debug log
-      setScores(results);
+      // ✅ Add username lookup for each score
+      const results = await Promise.all(
+        snapshot.docs.map(async (docSnap) => {
+          const data = docSnap.data() || {};
+          let username = "Anonymous";
+
+          try {
+            const userDoc = await getDoc(doc(db, "users", docSnap.id));
+            if (userDoc.exists()) {
+              username = userDoc.data().username || "Anonymous";
+            }
+          } catch (err) {
+            console.warn("[Leaderboard] Failed to fetch username:", err);
+          }
+
+          return {
+            id: docSnap.id,
+            username,
+            todayScore: data.todayScore ?? 0,
+            bestScore: data.bestScore ?? 0,
+          };
+        })
+      );
+
+      // ✅ Filter out users who have no scores (all 0)
+      const filtered = results.filter(
+        (item) => item.todayScore > 0 || item.bestScore > 0
+      );
+
+      setScores(filtered);
     } catch (err) {
       console.error("[Leaderboard] fetchScores error:", err);
+      setScores([]);
     } finally {
       setLoading(false);
     }
@@ -76,7 +105,7 @@ export default function LeaderboardScreen({ route, navigation }) {
   const renderItem = ({ item, index }) => (
     <View style={styles.scoreRow}>
       <Text style={styles.rank}>{index + 1}.</Text>
-      <Text style={styles.userId}>{item.id}</Text>
+      <Text style={styles.userId}>{item.username}</Text>
       <Text style={styles.score}>
         {mode === "today" ? item.todayScore : item.bestScore}
       </Text>
@@ -85,7 +114,7 @@ export default function LeaderboardScreen({ route, navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>🏆 Leaderboard</Text>
+      <Text style={styles.title}>Leaderboard</Text>
 
       {/* Game selector */}
       <View style={styles.selectorRow}>
@@ -117,7 +146,10 @@ export default function LeaderboardScreen({ route, navigation }) {
       {/* Mode selector */}
       <View style={styles.selectorRow}>
         <TouchableOpacity
-          style={[styles.selectorButton, mode === "today" && styles.activeButton]}
+          style={[
+            styles.selectorButton,
+            mode === "today" && styles.activeButton,
+          ]}
           onPress={() => setMode("today")}
         >
           <Text
@@ -130,7 +162,10 @@ export default function LeaderboardScreen({ route, navigation }) {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.selectorButton, mode === "allTime" && styles.activeButton]}
+          style={[
+            styles.selectorButton,
+            mode === "allTime" && styles.activeButton,
+          ]}
           onPress={() => setMode("allTime")}
         >
           <Text
@@ -180,7 +215,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: "bold",
     marginBottom: 20,
-    marginTop: 10, // keeps it clear of the notch
+    marginTop: 20,
     textAlign: "center",
     color: "#2a4d8f",
   },

@@ -2,9 +2,9 @@ import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 
 const games = [
-  { name: "Circle 🎯", route: "Draw" },
+  { name: "Circle", route: "Draw" },
   { name: "Opposite", route: "Opposite" },
-  { name: "Hidden Ball 🔮", route: "Ball" },
+  { name: "Hidden Ball", route: "Ball" },
   { name: "This or That", route: "ThisThat" },
   { name: "Memory Draw", route: "MemoryDraw" },
   { name: "Coming Soon" },

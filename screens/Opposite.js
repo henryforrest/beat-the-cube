@@ -81,6 +81,13 @@ export default function OppositeScreen({ navigation }) {
         >
           <Text style={styles.buttonText}>Go to Login</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Text style={styles.buttonText}>Go Home</Text>
+        </TouchableOpacity>
       </View>
     );
   }

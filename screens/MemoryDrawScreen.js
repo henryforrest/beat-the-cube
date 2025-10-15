@@ -1,3 +1,4 @@
+// ShapeMemoryScreen.js
 import React, { useState, useRef, useEffect } from "react";
 import {
   View,
@@ -9,6 +10,8 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Canvas, Path, Skia } from "@shopify/react-native-skia";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { auth, db } from "../firebase";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 
 export default function ShapeMemoryScreen({ navigation }) {
   const [path, setPath] = useState(() => Skia.Path.Make());
@@ -16,42 +19,73 @@ export default function ShapeMemoryScreen({ navigation }) {
   const [showShape, setShowShape] = useState(true);
   const pathRef = useRef(path);
   const pointsRef = useRef([]);
-  const [hasPlayedToday, setHasPlayedToday] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [todayScore, setTodayScore] = useState(0);
+  const [result, setResult] = useState(null);
 
   useEffect(() => {
-    checkDailyStatus();
+    const checkAttempt = async () => {
+      const today = new Date().toDateString();
+      const lastAttempt = await AsyncStorage.getItem("shapeAttempt");
+      const storedScore = await AsyncStorage.getItem(`shape-score-${today}`);
+      if (lastAttempt === today && storedScore) {
+        setLocked(true);
+        setTodayScore(parseInt(storedScore, 10));
+      }
+    };
+    checkAttempt();
 
-    // Hide the shape after 3 seconds
+    // Show shape briefly, then hide
     const timer = setTimeout(() => setShowShape(false), 3000);
     return () => clearTimeout(timer);
   }, []);
 
-  const checkDailyStatus = async () => {
-    const today = new Date().toDateString();
-    const lastPlayed = await AsyncStorage.getItem("shape-last-played");
-    const storedScore = await AsyncStorage.getItem(`shape-score-${today}`);
+  // 🔥 Save to Firestore
+  const saveScore = async (score) => {
+    if (!auth.currentUser) return;
+    const uid = auth.currentUser.uid;
+    const userRef = doc(db, "shapeGame", uid);
 
-    if (lastPlayed === today && storedScore) {
-      setHasPlayedToday(true);
-      setTodayScore(parseInt(storedScore, 10));
+    try {
+      const snap = await getDoc(userRef);
+      const prevBest = snap.exists() ? snap.data().bestScore || 0 : 0;
+      const newBest = Math.max(prevBest, score);
+
+      await setDoc(
+        userRef,
+        {
+          todayScore: score,
+          bestScore: newBest,
+          lastPlayed: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.error("[ShapeGame] Failed to save score:", err);
     }
   };
 
+  // 🧩 When shape is completed
   const handleShapeComplete = async (score) => {
+    if (locked || !auth.currentUser) return;
+
     const today = new Date().toDateString();
-    await AsyncStorage.setItem(`shape-score-${today}`, score.toString());
-    await AsyncStorage.setItem("shape-last-played", today);
-
     setTodayScore(score);
-    setHasPlayedToday(true);
+    setResult("done");
 
-    // 🎯 Score Feedback change later to update total score 
+    await AsyncStorage.setItem("shapeAttempt", today);
+    await AsyncStorage.setItem(`shape-score-${today}`, String(score));
+
+    await saveScore(score);
+
     if (score >= 95) {
-      Alert.alert("Perfect!", "🎯 You memorised it perfectly!");
+      Alert.alert("Perfect!", "🎯 You memorized it perfectly!");
     }
+
+    setLocked(true);
   };
 
+  // --- Drawing Functions ---
   const beginPath = (x, y) => {
     const newPath = Skia.Path.Make();
     newPath.moveTo(x, y);
@@ -75,34 +109,37 @@ export default function ShapeMemoryScreen({ navigation }) {
     handleShapeComplete(Math.round(score));
   };
 
-  const resetCanvas = () => {
-    const newPath = Skia.Path.Make();
-    pathRef.current = newPath;
-    setPath(newPath);
-    pointsRef.current = [];
-    setTodayScore(0);
-    setTargetShape(generateShape());
-    setShowShape(true);
-    setTimeout(() => setShowShape(false), 3000);
-  };
-
-  // 🔄 Dev Retry Button: clears today's play restriction
-  const devRetry = async () => {
-    await AsyncStorage.removeItem("shape-last-played");
-    await AsyncStorage.removeItem(`shape-score-${new Date().toDateString()}`);
-    setHasPlayedToday(false);
-    resetCanvas();
-  };
-
   const pan = Gesture.Pan()
     .runOnJS(true)
-    .onBegin(({ x, y }) => !hasPlayedToday && beginPath(x, y))
-    .onChange(({ x, y }) => !hasPlayedToday && movePath(x, y))
-    .onEnd(() => !hasPlayedToday && endPath())
-    .onFinalize(() => !hasPlayedToday && endPath());
+    .onBegin(({ x, y }) => !locked && beginPath(x, y))
+    .onChange(({ x, y }) => !locked && movePath(x, y))
+    .onEnd(() => !locked && endPath());
 
-  // 🔒 FULL LOCKED SCREEN
-  if (hasPlayedToday) {
+  // 🚪 Require Login
+  if (!auth.currentUser) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Shape Memory</Text>
+        <Text style={styles.subtitle}>🚪 Please log in to play</Text>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.navigate("Login")}
+        >
+          <Text style={styles.buttonText}>Go to Login</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Text style={styles.buttonText}>Go Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // 🔒 Locked / Finished Screen
+  if (result || locked) {
     return (
       <View style={styles.container}>
         <Text style={styles.title}>Shape Memory</Text>
@@ -112,29 +149,47 @@ export default function ShapeMemoryScreen({ navigation }) {
 
         <TouchableOpacity
           style={[styles.button, { marginTop: 30 }]}
+          onPress={() => navigation.navigate("Leaderboard", { game: "shape" })}
+        >
+          <Text style={styles.buttonText}>View Leaderboard</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, { marginTop: 20 }]}
           onPress={() => navigation.navigate("Home")}
         >
           <Text style={styles.buttonText}>Back to Home</Text>
         </TouchableOpacity>
 
-        {/* 🔄 Dev-only Retry Button */}
+        {/* 🔧 Dev Retry */}
         <TouchableOpacity
           style={[styles.devButton, { marginTop: 20 }]}
-          onPress={devRetry}
+          onPress={async () => {
+            await AsyncStorage.removeItem("shapeAttempt");
+            await AsyncStorage.removeItem(
+              `shape-score-${new Date().toDateString()}`
+            );
+            setLocked(false);
+            setResult(null);
+            setTodayScore(0);
+            setPath(Skia.Path.Make());
+            setTargetShape(generateShape());
+            setShowShape(true);
+            setTimeout(() => setShowShape(false), 3000);
+          }}
         >
           <Text style={styles.devButtonText}>🔧 Dev Retry</Text>
         </TouchableOpacity>
-
       </View>
     );
   }
 
-  // 🎨 PLAYABLE SCREEN
+  // 🎨 Play Screen
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Shape Memory</Text>
       <Text style={styles.subtitle}>
-        Memorise the shape and replicate it from memory!
+        Memorize the shape, then draw it from memory!
       </Text>
 
       <GestureDetector gesture={pan}>
@@ -157,51 +212,42 @@ export default function ShapeMemoryScreen({ navigation }) {
       >
         <Text style={styles.buttonText}>Back to Home</Text>
       </TouchableOpacity>
-
     </View>
   );
 }
 
-// Simple shape generator (random squiggle)
+// --- 🔹 Helper Functions ---
 function generateShape() {
-    const path = Skia.Path.Make();
-    let x = 50 + Math.random() * 200; // start somewhere inside canvas
-    let y = 50 + Math.random() * 200;
-    path.moveTo(x, y);
-  
-    // make larger movements (±80 instead of ±50)
-    for (let i = 0; i < 6; i++) {
-      x += Math.random() * 160 - 80;
-      y += Math.random() * 160 - 80;
-      path.lineTo(x, y);
-    }
-  
-    return path;
+  const path = Skia.Path.Make();
+  let x = 50 + Math.random() * 200;
+  let y = 50 + Math.random() * 200;
+  path.moveTo(x, y);
+  for (let i = 0; i < 6; i++) {
+    x += Math.random() * 160 - 80;
+    y += Math.random() * 160 - 80;
+    path.lineTo(x, y);
   }
-  
+  return path;
+}
 
-// Compare user path to target shape
 function compareShapes(userPoints, targetPath) {
-    const targetPoints = samplePath(targetPath, 40); // more samples
-    const len = Math.min(userPoints.length, targetPoints.length);
-  
-    let totalDist = 0;
-    for (let i = 0; i < len; i++) {
-      totalDist += Math.hypot(
-        userPoints[i].x - targetPoints[i].x,
-        userPoints[i].y - targetPoints[i].y
-      );
-    }
-  
-    const avgDist = totalDist / len;
-    const canvasDiag = Math.hypot(300, 300); // normalize by canvas size (~424)
-    let score = 100 - (avgDist / canvasDiag) * 100;
-  
-    return Math.max(0, Math.min(100, score));
-  }
-  
+  const targetPoints = samplePath(targetPath, 40);
+  const len = Math.min(userPoints.length, targetPoints.length);
+  let totalDist = 0;
 
-// Simple path sampler
+  for (let i = 0; i < len; i++) {
+    totalDist += Math.hypot(
+      userPoints[i].x - targetPoints[i].x,
+      userPoints[i].y - targetPoints[i].y
+    );
+  }
+
+  const avgDist = totalDist / len;
+  const canvasDiag = Math.hypot(300, 300);
+  let score = 100 - (avgDist / canvasDiag) * 100;
+  return Math.max(0, Math.min(100, score));
+}
+
 function samplePath(path, numPoints) {
   const points = [];
   const bounds = path.getBounds();
@@ -252,16 +298,17 @@ const styles = StyleSheet.create({
   },
   canvas: {
     width: "100%",
-    height: 400, // bigger play area
+    height: 400,
     backgroundColor: "#f6f6f6",
     borderRadius: 12,
     marginVertical: 20,
-  },  
+  },
   button: {
     backgroundColor: "#2a4d8f",
     paddingVertical: 12,
     borderRadius: 10,
     width: "100%",
+    marginTop: 10,
   },
   buttonText: {
     color: "#fff",

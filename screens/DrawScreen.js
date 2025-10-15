@@ -11,7 +11,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Canvas, Path, Skia } from "@shopify/react-native-skia";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
-// <-- Firebase imports (only added these)
 import { auth, db } from "../firebase";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
@@ -19,97 +18,66 @@ export default function DrawScreen({ navigation }) {
   const [path, setPath] = useState(() => Skia.Path.Make());
   const pathRef = useRef(path);
   const pointsRef = useRef([]);
-  const [hasPlayedToday, setHasPlayedToday] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [todayScore, setTodayScore] = useState(0);
+  const [result, setResult] = useState(null);
 
   useEffect(() => {
-    checkDailyStatus();
+    const checkAttempt = async () => {
+      const today = new Date().toDateString();
+      const lastAttempt = await AsyncStorage.getItem("circleAttempt");
+      const storedScore = await AsyncStorage.getItem(`circle-score-${today}`);
+      if (lastAttempt === today && storedScore) {
+        setLocked(true);
+        setTodayScore(parseInt(storedScore, 10));
+      }
+    };
+    checkAttempt();
   }, []);
 
-  const checkDailyStatus = async () => {
-    const today = new Date().toDateString();
-    const lastPlayed = await AsyncStorage.getItem("circle-last-played");
-    const storedScore = await AsyncStorage.getItem(`circle-score-${today}`);
+  // 🔥 Save score to Firestore if user logged in
+  const saveScore = async (score) => {
+    if (!auth.currentUser) return;
+    const uid = auth.currentUser.uid;
+    const userRef = doc(db, "circleGame", uid);
 
-    if (lastPlayed === today && storedScore) {
-      setHasPlayedToday(true);
-      setTodayScore(parseInt(storedScore, 10));
-    }
-
-    // --- Firestore sync: if user is logged in, try to read cloud record
     try {
-      if (auth.currentUser) {
-        const userDocRef = doc(db, "circleGame", auth.currentUser.uid);
-        const snap = await getDoc(userDocRef);
-        if (snap.exists()) {
-          const data = snap.data();
-          const lastPlayedDate =
-            data.lastPlayed && data.lastPlayed.toDate
-              ? data.lastPlayed.toDate().toDateString()
-              : null;
+      const snap = await getDoc(userRef);
+      const prevBest = snap.exists() ? snap.data().bestScore || 0 : 0;
+      const newBest = Math.max(prevBest, score);
 
-          // only set from Firestore if local didn't already mark played today
-          if (!hasPlayedToday && lastPlayedDate === today) {
-            setHasPlayedToday(true);
-            setTodayScore(data.todayScore || 0);
-
-            // keep local AsyncStorage in sync with the cloud
-            await AsyncStorage.setItem("circle-last-played", today);
-            await AsyncStorage.setItem(
-              `circle-score-${today}`,
-              String(data.todayScore || 0)
-            );
-          }
-        }
-      }
+      await setDoc(
+        userRef,
+        {
+          todayScore: score,
+          bestScore: newBest,
+          lastPlayed: serverTimestamp(),
+        },
+        { merge: true }
+      );
     } catch (err) {
-      // Don't break the game if Firestore is inaccessible — log and continue using AsyncStorage.
-      console.warn("[DrawScreen] Firestore checkDailyStatus failed:", err);
+      console.error("[CircleGame] Failed to save score:", err);
     }
   };
 
+  // 🎯 When player completes a circle
   const handleCircleComplete = async (score) => {
+    if (locked || !auth.currentUser) return;
+
     const today = new Date().toDateString();
-
-    // Keep your local storage logic exactly as before
-    try {
-      await AsyncStorage.setItem(`circle-score-${today}`, score.toString());
-      await AsyncStorage.setItem("circle-last-played", today);
-    } catch (e) {
-      console.warn("[DrawScreen] AsyncStorage write failed:", e);
-    }
-
     setTodayScore(score);
-    setHasPlayedToday(true);
+    setResult(score > 0 ? "done" : "fail");
 
-    // Update Firestore only if user is logged in. Errors are non-fatal.
-    if (auth.currentUser) {
-      try {
-        const userDocRef = doc(db, "circleGame", auth.currentUser.uid);
+    await AsyncStorage.setItem("circleAttempt", today);
+    await AsyncStorage.setItem(`circle-score-${today}`, String(score));
 
-        // read existing bestScore if present
-        const snap = await getDoc(userDocRef);
-        const existingBest = snap.exists() ? snap.data().bestScore || 0 : 0;
-        const newBest = Math.max(existingBest, score);
+    await saveScore(score);
 
-        await setDoc(
-          userDocRef,
-          {
-            todayScore: score,
-            bestScore: newBest,
-            lastPlayed: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      } catch (err) {
-        console.warn("[DrawScreen] Firestore update failed:", err);
-      }
-    }
-
-    // 🎯 Score Feedback (unchanged)
     if (score >= 95) {
       Alert.alert("Perfect!", "🎯 You're a circle master!");
     }
+
+    setLocked(true);
   };
 
   const beginPath = (x, y) => {
@@ -135,31 +103,37 @@ export default function DrawScreen({ navigation }) {
     handleCircleComplete(Math.round(score));
   };
 
-  const resetCanvas = () => {
-    const newPath = Skia.Path.Make();
-    pathRef.current = newPath;
-    setPath(newPath);
-    pointsRef.current = [];
-    setTodayScore(0);
-  };
-
-  // 🔄 Dev Retry Button: clears today's play restriction (kept as you had it)
-  const devRetry = async () => {
-    await AsyncStorage.removeItem("shape-last-played");
-    await AsyncStorage.removeItem(`shape-score-${new Date().toDateString()}`);
-    setHasPlayedToday(false);
-    resetCanvas();
-  };
-
   const pan = Gesture.Pan()
     .runOnJS(true)
-    .onBegin(({ x, y }) => !hasPlayedToday && beginPath(x, y))
-    .onChange(({ x, y }) => !hasPlayedToday && movePath(x, y))
-    .onEnd(() => !hasPlayedToday && endPath())
-    .onFinalize(() => !hasPlayedToday && endPath());
+    .onBegin(({ x, y }) => !locked && beginPath(x, y))
+    .onChange(({ x, y }) => !locked && movePath(x, y))
+    .onEnd(() => !locked && endPath());
 
-  // 🔒 FULL LOCKED SCREEN (unchanged)
-  if (hasPlayedToday) {
+  // 🚪 Require Login Screen
+  if (!auth.currentUser) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Circle Challenge</Text>
+        <Text style={styles.subtitle}>🚪 Please log in to play</Text>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.navigate("Login")}
+        >
+          <Text style={styles.buttonText}>Go to Login</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Text style={styles.buttonText}>Go Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // 🧱 Locked or finished for today
+  if (result || locked) {
     return (
       <View style={styles.container}>
         <Text style={styles.title}>Circle Challenge</Text>
@@ -181,10 +155,22 @@ export default function DrawScreen({ navigation }) {
           <Text style={styles.buttonText}>Back to Home</Text>
         </TouchableOpacity>
 
-        {/* 🔄 Dev-only Retry Button */}
+        {/* 🔧 Dev Retry */}
         <TouchableOpacity
           style={[styles.devButton, { marginTop: 20 }]}
-          onPress={devRetry}
+          onPress={async () => {
+            await AsyncStorage.removeItem("circleAttempt");
+            await AsyncStorage.removeItem(
+              `circle-score-${new Date().toDateString()}`
+            );
+            setLocked(false);
+            setResult(null);
+            setTodayScore(0);
+            const resetPath = Skia.Path.Make();
+            setPath(resetPath);
+            pathRef.current = resetPath;
+            pointsRef.current = [];
+          }}
         >
           <Text style={styles.devButtonText}>🔧 Dev Retry</Text>
         </TouchableOpacity>
@@ -192,7 +178,7 @@ export default function DrawScreen({ navigation }) {
     );
   }
 
-  // 🎨 PLAYABLE SCREEN (unchanged)
+  // 🎨 Main Drawing Game
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Circle Challenge</Text>
@@ -207,7 +193,7 @@ export default function DrawScreen({ navigation }) {
       </GestureDetector>
 
       <TouchableOpacity
-        style={[styles.button, { marginTop: 15 }]}
+        style={[styles.button, { marginTop: 20 }]}
         onPress={() => navigation.navigate("Home")}
       >
         <Text style={styles.buttonText}>Back to Home</Text>
@@ -216,6 +202,7 @@ export default function DrawScreen({ navigation }) {
   );
 }
 
+// --- Circle Scoring Algorithm ---
 function calculateCircleScore(points) {
   if (!points || points.length < 10) return 0;
 
@@ -292,6 +279,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     width: "100%",
+    marginTop: 10,
   },
   buttonText: {
     color: "#fff",
