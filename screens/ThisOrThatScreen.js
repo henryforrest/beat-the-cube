@@ -7,6 +7,8 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { auth } from "../firebase"; // ⬅️ Added login check
+
 const questions = [
   { a: "Pizza 🍕", b: "Burger 🍔" },
   { a: "Coffee ☕", b: "Tea 🍵" },
@@ -29,12 +31,11 @@ export default function ThisOrThatScreen({ navigation }) {
   const [todayKey, setTodayKey] = useState("");
 
   useEffect(() => {
-    // Daily question (deterministic)
     const todayIndex =
       Math.floor(Date.now() / (1000 * 60 * 60 * 24)) % questions.length;
     setTodayQuestion(questions[todayIndex]);
 
-    const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+    const today = new Date().toISOString().split("T")[0];
     const key = `thisorthat-${today}`;
     setTodayKey(key);
 
@@ -52,6 +53,30 @@ export default function ThisOrThatScreen({ navigation }) {
     setSubmitted(true);
     await AsyncStorage.setItem(todayKey, choice);
   };
+
+  // 🔐 Require Login (same style as DrawScreen)
+  if (!auth.currentUser) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>This or That</Text>
+        <Text style={styles.subtitle}>🚪 Please log in to play</Text>
+
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.navigate("Login")}
+        >
+          <Text style={styles.buttonText}>Go to Login</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, { marginTop: 15 }]}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Text style={styles.buttonText}>Go Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -86,7 +111,6 @@ export default function ThisOrThatScreen({ navigation }) {
             </Text>
 
             {(() => {
-              // Update answers object (demo only)
               if (answers[selected]) {
                 answers[selected] += 1;
               } else {
@@ -151,6 +175,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#777",
     marginTop: 10,
+    marginBottom: 10,
   },
   question: {
     fontSize: 24,
@@ -164,6 +189,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     width: "100%",
+    marginTop: 10,
   },
   buttonText: {
     color: "#fff",

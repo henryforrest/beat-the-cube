@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
   input: { height: 45, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, marginTop: 20, backgroundColor: "#fafafa" },
   button: { backgroundColor: "#2a4d8f", paddingVertical: 12, borderRadius: 10, width: "100%", marginTop: 10 },
   buttonText: { color: "#fff", fontSize: 18, textAlign: "center", fontWeight: "600" },
-  subtitle: { fontSize: 16, textAlign: "center", marginBottom: 10 },
+  subtitle: { fontSize: 16, textAlign: "center", marginBottom: 10, marginBottom: 10 },
   resultBox: { marginTop: 20, alignItems: "center" },
   resultText: { fontSize: 18, fontWeight: "600", marginTop: 10, textAlign: "center" },
 });
