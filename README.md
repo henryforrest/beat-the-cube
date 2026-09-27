@@ -1,5 +1,7 @@
 # Beat the Cube
 
+*Work in progress. Five of the six games are built, and it is not on an app store yet.*
+
 A small React Native app, built with Expo, that is a cube of daily minigames. Each face of the cube is a different game, you get exactly one attempt at each game per day, and the scored games feed a Firestore-backed leaderboard with daily and all-time views. I built it in my own time to get hands-on with Expo, React Navigation, Firebase, and canvas drawing on mobile.
 
 Built with React Native 0.79 / Expo SDK 53, React 19, React Navigation 7, Firebase (Authentication and Firestore, via the JS SDK), React Native Skia, React Native Gesture Handler and AsyncStorage.
